@@ -1,0 +1,182 @@
+CLASS_NAMES: ['vehicle', 'tricycle', 'big_vehicle', 'huge_vehicle', 'motorcycle', 'bicycle', 'pedestrian', 'cone']
+
+DATA_CONFIG:
+    _BASE_CONFIG_: cfgs/dataset_configs/robosense_dataset.yaml
+    POINT_CLOUD_RANGE: [-51.2, -51.2, -5.0, 51.2, 51.2, 3.0] # 0.2
+    #POINT_CLOUD_RANGE: [-60.0, -60.0, -5.0, 60.0, 60.0, 3.0]  # 0.15
+    BALANCED_RESAMPLING: True
+    DATA_PROCESSOR:
+        - NAME: mask_points_and_boxes_outside_range
+          REMOVE_OUTSIDE_BOXES: True
+
+        - NAME: shuffle_points
+          SHUFFLE_ENABLED: {
+            'train': True,
+            'test': False
+          }
+
+        - NAME: transform_points_to_voxels
+          VOXEL_SIZE: [0.2, 0.2, 8.0]
+          MAX_POINTS_PER_VOXEL: 32
+          MAX_NUMBER_OF_VOXELS: {
+            'train': 30000,
+            'test': 30000
+          }
+    DATA_AUGMENTOR:
+        DISABLE_AUG_LIST: ['placeholder']
+        AUG_CONFIG_LIST:
+            - NAME: gt_sampling
+              USE_ROAD_PLANE: False
+              DB_INFO_PATH:
+                  - robosense_dbinfos_train.pkl
+              PREPARE: {
+                 filter_by_min_points: ['vehicle:5', 'tricycle:5', 'big_vehicle:5', 'huge_vehicle:5',
+                  'motorcycle:5', 'bicycle:5', 'pedestrian:5', 'cone:5'
+                 ],
+              }
+
+              SAMPLE_GROUPS: ['vehicle:2', 'tricycle:8', 'big_vehicle:4', 'huge_vehicle:8',
+                              'motorcycle:6', 'bicycle:8', 'pedestrian:2', 'cone:6']
+
+              NUM_POINT_FEATURES: 4
+              DATABASE_WITH_FAKELIDAR: False
+              REMOVE_EXTRA_WIDTH: [0.0, 0.0, 0.0]
+              LIMIT_WHOLE_SCENE: False
+
+            - NAME: random_world_flip
+              ALONG_AXIS_LIST: ['x', 'y']
+
+            - NAME: random_world_rotation
+              WORLD_ROT_ANGLE: [-0.3925, 0.3925]
+
+            - NAME: random_world_scaling
+              WORLD_SCALE_RANGE: [0.95, 1.05]
+
+MODEL:
+    NAME: PointPillar
+
+    VFE:
+        NAME: PillarVFE
+        WITH_DISTANCE: False
+        USE_ABSLOTE_XYZ: True
+        USE_NORM: True
+        NUM_FILTERS: [64]
+
+    MAP_TO_BEV:
+        NAME: PointPillarScatter
+        NUM_BEV_FEATURES: 64
+
+    BACKBONE_2D:
+        NAME: BaseBEVBackbone
+        LAYER_NUMS: [3, 5, 5]
+        LAYER_STRIDES: [2, 2, 2]
+        NUM_FILTERS: [64, 128, 256]
+        UPSAMPLE_STRIDES: [0.5, 1, 2]
+        NUM_UPSAMPLE_FILTERS: [128, 128, 128]
+
+    DENSE_HEAD:
+        NAME: CenterHeadMulti
+        CLASS_AGNOSTIC: False
+
+        USE_MULTIHEAD: True
+        # rpn后所有头前的一层共享卷积, NUM_FILTERS：64
+        SHARED_CONV_NUM_FILTER: 64
+
+        RPN_HEAD_CFGS: [
+        {
+          'HEAD_CLS_NAME': ['vehicle', 'tricycle'],
+        },
+        {
+          'HEAD_CLS_NAME': ['big_vehicle', 'huge_vehicle'],
+        },
+        {
+          'HEAD_CLS_NAME': ['motorcycle', 'bicycle'],
+        },
+        {
+          'HEAD_CLS_NAME': ['pedestrian', 'cone'],
+        },
+        ]
+
+        # 每个头的卷积,
+        # TODO
+        # > 不同类的头用不同的卷积层,比如对于大车用更深的卷积/更小尺寸的特征图,增大感受野
+        # > 当前朝向角只有sin cos编码
+        SEPARATE_REG_CONFIG:
+            NUM_MIDDLE_FILTER: [64]
+            NUM_MIDDLE_KERNEL: [3]
+            FINAL_KERNEL: 1
+            REG_LIST: ['offset:2', 'height:1', 'size:3', 'orientation:2']
+
+        # some center_net super_param
+        # MAP_STRIDE: RPN阶段特征图缩小尺寸  >4:(UPSAMPLE_STRIDES: [0.5, 1, 2]) //   >2:(UPSAMPLE_STRIDES: [1, 2, 4])
+        # ORIENTATION_ENCODING_TYPE: 朝向角编码类型, 当前只有2sin_cos
+        # OFFSET_RADIUS: afdet中offset计算损失时方形区域半径-->待测试. (默认0)
+        # HEATMAP_ENCODING_TYPE: heatmap类型, 可选['umich_gaussian', 'car_shape', 'car_shape_real'],分别对应 centerpoint、afdet、...
+        # GAUSS_OVERLAP && GAUSS_MIN_RADIUS: 当热力图类型是gaussian的时候的超参
+        TARGET_ASSIGNER_CONFIG:
+            MAP_STRIDE: 4
+            ORIENTATION_ENCODING_TYPE: 2sin_cos
+            OFFSET_RADIUS: 0
+            HEATMAP_ENCODING_TYPE: car_shape      # Optional ['umich_gaussian', 'car_shape', 'car_shape_real']
+            GAUSS_OVERLAP: 0.1
+            GAUSS_MIN_RADIUS: 2
+
+        # TODO
+        # 不同的权重选择，主要是hm_weight的权重
+        LOSS_CONFIG:
+            USE_BalancedL1Loss: False
+            LOSS_WEIGHTS: {
+                'hm_weight': 1.0,
+                'offset_weight': 1.0,
+                'height_weight': 1.0,
+                'size_weight': 1.0,
+                'orientation_weight': 1.0
+            }
+
+        # 后处理
+        # USE_MAXPOOL: 原centernet论文只用maxpool
+        # USE_CIRCLE_NMS: centerpoint用CIRCLE_NMS
+        # USE_IOU_NMS: 因为是多头, circle nms和maxpool都不能解决同一个位置不同类对象交叠情况, 因此暂时解决方法可以是在最后再用一次NMS...(TODO)
+        # MIN_RADIUS: 用circle nms时(就是以对象中心点直接固定半径NMS)的按类别的半径大小
+        POST_CONFIG:
+            USE_MAXPOOL: False
+            USE_CIRCLE_NMS: True
+            USE_IOU_NMS: False
+
+            MIN_RADIUS: [4, 10, 0.55, 0.25]
+            MAX_PRE_IMG: 512
+            MAX_POST: 83
+            SCORE_THRESHOLD: 0.2
+
+            NMS_CONFIG:
+                MULTI_CLASSES_NMS: False
+                NMS_TYPE: nms_gpu
+                NMS_THRESH: 0.01
+                NMS_PRE_MAXSIZE: 4096
+                NMS_POST_MAXSIZE: 500
+
+    POST_PROCESSING:
+      USED_CENTER_POST: True
+      RECALL_THRESH_LIST: [0.3, 0.5, 0.7]
+      EVAL_METRIC: kitti
+
+OPTIMIZATION:
+    BATCH_SIZE_PER_GPU: 2
+    NUM_EPOCHS: 80
+
+    OPTIMIZER: adam_onecycle
+    LR: 0.002
+    WEIGHT_DECAY: 0.01
+    MOMENTUM: 0.9
+
+    MOMS: [0.95, 0.85]
+    PCT_START: 0.4
+    DIV_FACTOR: 10
+    DECAY_STEP_LIST: [35, 45]
+    LR_DECAY: 0.1
+    LR_CLIP: 0.0000001
+
+    LR_WARMUP: False
+    WARMUP_EPOCH: 1
+
+    GRAD_NORM_CLIP: 10

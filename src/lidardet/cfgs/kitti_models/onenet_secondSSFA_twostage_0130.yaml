@@ -1,0 +1,200 @@
+CLASS_NAMES: ['Car', 'Pedestrian', 'Cyclist']
+
+DATA_CONFIG:
+    _BASE_CONFIG_: cfgs/dataset_configs/kitti_dataset.yaml
+
+
+MODEL:
+    NAME: CenterPoint
+
+    VFE:
+        NAME: MeanVFE
+
+    BACKBONE_3D:
+        NAME: VoxelBackBone8x
+
+    MAP_TO_BEV:
+        NAME: HeightCompression
+        NUM_BEV_FEATURES: 256
+
+#    BACKBONE_2D:
+#        NAME: BaseBEVBackbone
+#
+#        LAYER_NUMS: [5, 5]
+#        LAYER_STRIDES: [1, 2]
+#        NUM_FILTERS: [128, 256]
+#        UPSAMPLE_STRIDES: [1, 2]
+#        NUM_UPSAMPLE_FILTERS: [256, 256]
+
+    BACKBONE_2D:
+        NAME: CIASSDSSFA
+        layer_nums: [5,]
+        ds_layer_strides: [1,]
+        ds_num_filters: [128,]
+        us_layer_strides: [1,]
+        us_num_filters: [128,]
+
+
+    DENSE_HEAD:
+        NAME: CenterHeadMulti
+        CLASS_AGNOSTIC: False
+
+        USE_MULTIHEAD: True
+        SHARED_CONV_NUM_FILTER: 64
+
+        RPN_HEAD_CFGS: [
+        {
+          'HEAD_CLS_NAME': ['Car'],
+        },
+        {
+          'HEAD_CLS_NAME': ['Pedestrian'],
+        },
+        {
+          'HEAD_CLS_NAME': ['Cyclist'],
+        },
+        ]
+
+        USE_AUXILIARY_REG: corner_cls   # ['point_counts', 'corner_cls']
+        SEPARATE_REG_CONFIG:
+          NUM_MIDDLE_FILTER: [64]
+          NUM_MIDDLE_KERNEL: [3]
+          FINAL_KERNEL: 1
+          REG_LIST: ['offset:2', 'height:1', 'size:3', 'orientation:2']
+
+        # some center_net super_param
+        TARGET_ASSIGNER_CONFIG:
+            MAP_STRIDE: 8
+            ORIENTATION_ENCODING_TYPE: 2sin_cos
+            OFFSET_RADIUS: 0
+            HEATMAP_ENCODING_TYPE: car_shape   # Optional ['umich_gaussian', 'car_shape', 'points_count']
+            GAUSS_OVERLAP: 0.1
+            GAUSS_MIN_RADIUS: 2
+
+        LOSS_CONFIG:
+            USE_BalancedL1Loss: False
+            USE_ONENET: True
+            LOSS_WEIGHTS: {
+                'hm_weight': 1.0,
+                'offset_weight': 1.0,
+                'height_weight': 1.0,
+                'size_weight': 1.0,
+                'orientation_weight': 1.0,
+                'point_counts_weight': 0.5,
+                'corner_cls_weight': 0.5
+            }
+
+        POST_CONFIG:
+            USE_MAXPOOL: False
+            USE_CIRCLE_NMS: False
+            USE_IOU_NMS: True
+
+            MIN_RADIUS: [4, 0.25, 0.55]  # [Car', 'Pedestrian', 'Cyclist']
+            MAX_PRE_IMG: 100
+            MAX_POST: 33
+            SCORE_THRESHOLD: 0.1
+
+            NMS_CONFIG:
+                MULTI_CLASSES_NMS: False
+                NMS_TYPE: nms_gpu
+                NMS_PRE_MAXSIZE: 9000
+                NMS_POST_MAXSIZE: 500
+                NMS_THRESH: 0.8
+
+    SECOND_STAGE:
+        NAME: BEVFeatureExtractor
+        PC_START: [0, -39.68]
+        VOXEL_SIZE: [0.16, 0.16]
+        OUT_STRIDE: 8
+        NUM_POINT: 6
+        FREEZE: False
+
+    ROI_HEAD:
+        NAME: CenterROIHead
+        CLASS_AGNOSTIC: True
+
+        SHARED_FC: [256, 256]
+        CLS_FC: [256, 256]
+        REG_FC: [256, 256]
+        DP_RATIO: 0.3
+
+        NMS_CONFIG:
+            TRAIN:
+                NMS_TYPE: nms_gpu
+                MULTI_CLASSES_NMS: False
+                NMS_PRE_MAXSIZE: 9000
+                NMS_POST_MAXSIZE: 500
+                NMS_THRESH: 0.8
+            TEST:
+                NMS_TYPE: nms_gpu
+                MULTI_CLASSES_NMS: False
+                NMS_PRE_MAXSIZE: 1024
+                NMS_POST_MAXSIZE: 500
+                NMS_THRESH: 0.7
+
+        ROI_GRID_POOL:
+            GRID_SIZE: 6
+            MLPS: [[64, 64], [64, 64]]
+            POOL_RADIUS: [0.8, 1.6]
+            NSAMPLE: [16, 16]
+            POOL_METHOD: max_pool
+
+        TARGET_CONFIG:
+            BOX_CODER: ResidualCoder
+            ROI_PER_IMAGE: 128
+            FG_RATIO: 0.5
+
+            SAMPLE_ROI_BY_EACH_CLASS: True
+            CLS_SCORE_TYPE: roi_iou
+
+            CLS_FG_THRESH: 0.75
+            CLS_BG_THRESH: 0.25
+            CLS_BG_THRESH_LO: 0.1
+            HARD_BG_RATIO: 0.8
+
+            REG_FG_THRESH: 0.55
+
+        LOSS_CONFIG:
+            CLS_LOSS: BinaryCrossEntropy
+            REG_LOSS: L1
+            CORNER_LOSS_REGULARIZATION: True
+            LOSS_WEIGHTS: {
+                'rcnn_cls_weight': 1.0,
+                'rcnn_reg_weight': 1.0,
+                'rcnn_corner_weight': 1.0,
+                'code_weights': [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+            }
+
+    POST_PROCESSING:
+        USED_CENTER_POST: True
+        RECALL_THRESH_LIST: [0.3, 0.5, 0.7]
+        EVAL_METRIC: kitti
+
+        SCORE_THRESH: 0.1
+        NMS_CONFIG:
+            MULTI_CLASSES_NMS: False
+            NMS_TYPE: nms_gpu
+            NMS_THRESH: 0.1
+            NMS_PRE_MAXSIZE: 4096
+            NMS_POST_MAXSIZE: 500
+
+
+OPTIMIZATION:
+    BATCH_SIZE_PER_GPU: 4
+    NUM_EPOCHS: 80
+
+    OPTIMIZER: adam_onecycle
+    LR: 0.003
+    WEIGHT_DECAY: 0.01
+    MOMENTUM: 0.9
+
+    MOMS: [0.95, 0.85]
+    PCT_START: 0.4
+    DIV_FACTOR: 10
+    DECAY_STEP_LIST: [35, 45]
+    LR_DECAY: 0.1
+    LR_CLIP: 0.0000001
+
+    LR_WARMUP: False
+    WARMUP_EPOCH: 1
+
+    GRAD_NORM_CLIP: 10
