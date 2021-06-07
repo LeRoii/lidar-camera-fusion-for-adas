@@ -176,8 +176,8 @@ class Precessor_ROS:
         scores = pred['pred_scores'].detach().cpu().numpy()
         types = pred['pred_labels'].detach().cpu().numpy()
         #print(f" pred boxes: { boxes_lidar }")
-        print(f" pred labels: {types}")
-        print(f" pred scores: {scores}")
+        # print(f" pred labels: {types}")
+        # print(f" pred scores: {scores}")
         #print(pred_dicts)
 
         return scores, boxes_lidar, types
@@ -365,7 +365,7 @@ def lidar_callback(msg):
 
     bboxid = 0
     for tracked in lidartracker.trackerList:
-        if tracked.age < 5:
+        if tracked.age < -5:
             continue
         else:
             point_list = []
@@ -707,7 +707,7 @@ if __name__ == "__main__":
     # rospy.spin()
     # # rate.sleep()
 
-    bagfile = '/space/data/sq/rslidar32.bag'
+    bagfile = '/space/data/sq/lidar0429_3.4.bag'
     bag = rosbag.Bag(bagfile,'r')
     print(bag.get_type_and_topic_info())
     pub_pt = rospy.Publisher('/rslidar_points', PointCloud2, queue_size=1)

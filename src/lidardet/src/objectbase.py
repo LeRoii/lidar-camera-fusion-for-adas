@@ -45,12 +45,16 @@ def yaw2quaternion(yaw: float) -> Quaternion:
     return Quaternion(axis=[0,0,1], radians=yaw)
 
 def makeobjects(networkret):
-    def makeobject(objdata):
+    objs = []
+    for objdata in networkret:
+        if objdata[7] < 0.6:
+            continue
         centerpt = point3d(objdata[0], objdata[1], objdata[2])
         length = objdata[3]
         w = objdata[4]
         h = objdata[5]
         theta = objdata[6]
+        if theta < 0: theta += np.pi * 2
         heading = yaw2quaternion(objdata[6])
         corners = []
         for i in range(8):
@@ -59,13 +63,8 @@ def makeobjects(networkret):
 
         bbox3d = boundbox3d(centerpt,length,w,h,heading,corners,theta)
         obj = objectbase(objtype=objdata[8],bbox3d=bbox3d,confidence=objdata[7])
-        
-        return obj
-    return list(map(makeobject, networkret))
-
-# @attr.s
-# class lidarobject(objectbase):
-#     pass
+        objs.append(obj)
+    return objs
 
 if __name__=='__main__':
     ret = [[0,0,0,1,1,1,2,0.8,3],[0,0,0,1,1,1,2,0.8,3]]
