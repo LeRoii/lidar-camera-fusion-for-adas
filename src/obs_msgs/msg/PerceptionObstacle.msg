@@ -1,0 +1,9 @@
+int64 id
+int32 type
+float32 x
+float32 y
+float32 heading
+float32 length
+float32 width
+float32 height
+float32 velocity

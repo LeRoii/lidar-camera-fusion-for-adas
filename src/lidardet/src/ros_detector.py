@@ -9,7 +9,6 @@ from geometry_msgs.msg import Point, Point32, Pose
 
 from std_msgs.msg import Header
 
-
 import numpy as np
 import os
 import sys
@@ -30,6 +29,9 @@ from objectbase import objectbase, makeobjects
 from tracker import tracker
 
 import rosbag
+from sensor_msgs.msg import Image
+from obs_msgs.msg import PerceptionObstacle, PerceptionObstacles
+from predict import Predictor
 
 class DemoDataset(DatasetTemplate):
     def __init__(self, dataset_cfg, class_names, training=True, root_path=None, logger=None, ext='.bin'):
@@ -203,6 +205,11 @@ def get_xyz_points(cloud_array, remove_nans=True, dtype=np.float):
     # points[..., 2] = cloud_array['z'] + 0.2  # kitti
 
     # points[..., 2] = cloud_array['z'] + 0.2  # nuscene
+
+    # points[..., 0] = cloud_array['y']
+    # points[..., 1] = -cloud_array['x']
+    # points[..., 2] = cloud_array['z'] + 1.0  # sq
+
     return points
 
 
@@ -293,6 +300,7 @@ def boxes_to_corners_3d(boxes3d):
 
 
 lidartracker = tracker()
+predictor = Predictor(120)
 def lidar_callback(msg):
     print('lidar_callback')
     t1 = time.time()
@@ -304,14 +312,34 @@ def lidar_callback(msg):
 
     # print(np_p.size)
     scores, dt_box_lidar, types = proc_1.run(np_p)
+    if len(dt_box_lidar) == 0:
+        netret = []
+    else:
+        np_p[:, 2] -= 2.0
+        bbox_corners3d = boxes_to_corners_3d(dt_box_lidar)
+        corners = bbox_corners3d.reshape((bbox_corners3d.shape[0],-1))
+        netret = np.column_stack((dt_box_lidar, scores, types, corners))
 
-    np_p[:, 2] -= 2.0
-    bbox_corners3d = boxes_to_corners_3d(dt_box_lidar)
-    corners = bbox_corners3d.reshape((bbox_corners3d.shape[0],-1))
-
-    netret = np.column_stack((dt_box_lidar, scores, types, corners))
     objs = makeobjects(netret)
     lidartracker.update(objs)
+
+    # prediction
+    predinput = PerceptionObstacles() 
+    predinput.header.stamp = rospy.Time.now()
+    predinput.header.frame_id = frame_id
+    for trackedobj in lidartracker.trackerList:
+        obj = PerceptionObstacle()
+        obj.id = trackedobj.id
+        obj.type = int(trackedobj.objtype)
+        obj.x = trackedobj.bbox3d.centerpoint.x
+        obj.y = trackedobj.bbox3d.centerpoint.y
+        obj.heading = trackedobj.bbox3d.heading
+        obj.length = trackedobj.bbox3d.length
+        obj.width = trackedobj.bbox3d.width
+        obj.height = trackedobj.bbox3d.height
+        predinput.obstacles.append(obj)
+
+    pred, mean_xy = predictor.obstacle_callback(predinput)
 
     empty_markers = MarkerArray()
     clear_marker = Marker()
@@ -325,6 +353,32 @@ def lidar_callback(msg):
     pub_bbox_array.publish(empty_markers)
 
     bbox_arry = MarkerArray()
+
+    for i in range(len(lidartracker.trackerList)):
+        trajectory = Marker()
+        trajectory.type = Marker.LINE_STRIP
+        trajectory.ns = "trajectory"
+        trajectory.lifetime = rospy.Duration()
+        trajectory.header.stamp = rospy.Time.now()
+        trajectory.header.frame_id = frame_id
+
+        pred_xy = pred[0, :, :, i]
+        for j in range(pred_xy.shape[-1]):
+            p = Point()
+            p.x = pred_xy[0, j] + mean_xy[0]
+            p.y = pred_xy[1, j] + mean_xy[1]
+            p.z = 0
+            trajectory.points.append(p)
+
+        trajectory.scale.x = 0.1
+        trajectory.color.a = 1.0
+        trajectory.color.r = 0.0
+        trajectory.color.g = 0.0
+        trajectory.color.b = 1.0
+        trajectory.id = i+1000
+        bbox_arry.markers.append(trajectory)
+
+
     for i in range(scores.size):
         point_list = []
         bbox = Marker()
@@ -707,13 +761,19 @@ if __name__ == "__main__":
     # rospy.spin()
     # # rate.sleep()
 
+    bagfile = '/space/data/sq/lidar_camera_imu_2021-06-03-10-18-20-4.bag'
     bagfile = '/space/data/sq/lidar0429_3.4.bag'
+    # bagfile = '/space/data/sq/rslidar_mems.bag'
     bag = rosbag.Bag(bagfile,'r')
     print(bag.get_type_and_topic_info())
     pub_pt = rospy.Publisher('/rslidar_points', PointCloud2, queue_size=1)
-    bag_data = bag.read_messages('/rslidar_points')
+    pub_img = rospy.Publisher('/cam_front', Image, queue_size=1)
+    bag_data = bag.read_messages()
     for topic, msg, t in bag_data:
-        pub_pt.publish(msg)
-        lidar_callback(msg)
-        time.sleep(0.05)
+        if topic == '/rslidar_points':
+            pub_pt.publish(msg)
+            lidar_callback(msg)
+        if topic == '/cam_front/csi_cam/image_raw':
+            pub_img.publish(msg)
+        # time.sleep(0.05)
 

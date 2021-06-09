@@ -1,0 +1,2 @@
+std_msgs/Header header
+obs_msgs/PredictedObstacle[] predicted_obstacles
