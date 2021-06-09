@@ -290,14 +290,10 @@ def boxes_to_corners_3d(boxes3d):
     )) / 2
 
     corners3d = boxes3d[:, None, 3:6].repeat(1, 8, 1) * template[None, :, :]
-    a = boxes3d[:, None, 3:6]
-    b = template[None, :, :]
-    c = boxes3d[:, None, 3:6].repeat(1, 8, 1)
     corners3d = rotate_points_along_z(corners3d.view(-1, 8, 3), boxes3d[:, 6]).view(-1, 8, 3)
     corners3d += boxes3d[:, None, 0:3]
 
     return corners3d.numpy() if is_numpy else corners3d
-
 
 lidartracker = tracker()
 predictor = Predictor(120)
@@ -354,6 +350,7 @@ def lidar_callback(msg):
 
     bbox_arry = MarkerArray()
 
+    # draw trajectory
     for i in range(len(lidartracker.trackerList)):
         trajectory = Marker()
         trajectory.type = Marker.LINE_STRIP
@@ -379,6 +376,7 @@ def lidar_callback(msg):
         bbox_arry.markers.append(trajectory)
 
 
+    # draw detection objs
     for i in range(scores.size):
         point_list = []
         bbox = Marker()
@@ -417,6 +415,7 @@ def lidar_callback(msg):
         bbox.header.frame_id = frame_id
         bbox_arry.markers.append(bbox)
 
+    # draw tracked objs
     bboxid = 0
     for tracked in lidartracker.trackerList:
         if tracked.age < -5:
@@ -483,225 +482,6 @@ def lidar_callback(msg):
 
     pub_bbox_array.publish(bbox_arry)
     pass
-
-    # empty_markers = MarkerArray()
-    # clear_marker = Marker()
-    # clear_marker.header.stamp = rospy.Time.now()
-    # clear_marker.header.frame_id = frame_id
-    # clear_marker.ns = "objects"
-    # clear_marker.id = 0
-    # clear_marker.action = clear_marker.DELETEALL
-    # clear_marker.lifetime = rospy.Duration()
-    # empty_markers.markers.append(clear_marker)
-    # pub_bbox_array.publish(empty_markers)
-
-    # bbox_arry = MarkerArray()
-    # if scores.size != 0:
-    #     for i in range(scores.size):
-    #         point_list = []
-    #         bbox = Marker()
-    #         bbox.type = Marker.LINE_LIST
-    #         bbox.ns = "objects"
-    #         bbox.id = i
-    #         box = bbox_corners3d[i]
-    #         q = yaw2quaternion(float(dt_box_lidar[i][6]))
-    #         for j in range(24):
-    #             p = Point()
-    #             point_list.append(p)
-
-    #         point_list[0].x = float(box[0, 0])
-    #         point_list[0].y = float(box[0, 1])
-    #         point_list[0].z = float(box[0, 2])
-    #         point_list[1].x = float(box[1, 0])
-    #         point_list[1].y = float(box[1, 1])
-    #         point_list[1].z = float(box[1, 2])
-
-    #         point_list[2].x = float(box[1, 0])
-    #         point_list[2].y = float(box[1, 1])
-    #         point_list[2].z = float(box[1, 2])
-    #         point_list[3].x = float(box[2, 0])
-    #         point_list[3].y = float(box[2, 1])
-    #         point_list[3].z = float(box[2, 2])
-
-    #         point_list[4].x = float(box[2, 0])
-    #         point_list[4].y = float(box[2, 1])
-    #         point_list[4].z = float(box[2, 2])
-    #         point_list[5].x = float(box[3, 0])
-    #         point_list[5].y = float(box[3, 1])
-    #         point_list[5].z = float(box[3, 2])
-
-    #         point_list[6].x = float(box[3, 0])
-    #         point_list[6].y = float(box[3, 1])
-    #         point_list[6].z = float(box[3, 2])
-    #         point_list[7].x = float(box[0, 0])
-    #         point_list[7].y = float(box[0, 1])
-    #         point_list[7].z = float(box[0, 2])
-
-    #         point_list[8].x = float(box[4, 0])
-    #         point_list[8].y = float(box[4, 1])
-    #         point_list[8].z = float(box[4, 2])
-    #         point_list[9].x = float(box[5, 0])
-    #         point_list[9].y = float(box[5, 1])
-    #         point_list[9].z = float(box[5, 2])
-
-    #         point_list[10].x = float(box[5, 0])
-    #         point_list[10].y = float(box[5, 1])
-    #         point_list[10].z = float(box[5, 2])
-    #         point_list[11].x = float(box[6, 0])
-    #         point_list[11].y = float(box[6, 1])
-    #         point_list[11].z = float(box[6, 2])
-
-    #         point_list[12].x = float(box[6, 0])
-    #         point_list[12].y = float(box[6, 1])
-    #         point_list[12].z = float(box[6, 2])
-    #         point_list[13].x = float(box[7, 0])
-    #         point_list[13].y = float(box[7, 1])
-    #         point_list[13].z = float(box[7, 2])
-
-    #         point_list[14].x = float(box[7, 0])
-    #         point_list[14].y = float(box[7, 1])
-    #         point_list[14].z = float(box[7, 2])
-    #         point_list[15].x = float(box[4, 0])
-    #         point_list[15].y = float(box[4, 1])
-    #         point_list[15].z = float(box[4, 2])
-
-    #         point_list[16].x = float(box[0, 0])
-    #         point_list[16].y = float(box[0, 1])
-    #         point_list[16].z = float(box[0, 2])
-    #         point_list[17].x = float(box[4, 0])
-    #         point_list[17].y = float(box[4, 1])
-    #         point_list[17].z = float(box[4, 2])
-
-    #         point_list[18].x = float(box[1, 0])
-    #         point_list[18].y = float(box[1, 1])
-    #         point_list[18].z = float(box[1, 2])
-    #         point_list[19].x = float(box[5, 0])
-    #         point_list[19].y = float(box[5, 1])
-    #         point_list[19].z = float(box[5, 2])
-
-    #         point_list[20].x = float(box[2, 0])
-    #         point_list[20].y = float(box[2, 1])
-    #         point_list[20].z = float(box[2, 2])
-    #         point_list[21].x = float(box[6, 0])
-    #         point_list[21].y = float(box[6, 1])
-    #         point_list[21].z = float(box[6, 2])
-
-    #         point_list[22].x = float(box[3, 0])
-    #         point_list[22].y = float(box[3, 1])
-    #         point_list[22].z = float(box[3, 2])
-    #         point_list[23].x = float(box[7, 0])
-    #         point_list[23].y = float(box[7, 1])
-    #         point_list[23].z = float(box[7, 2])
-
-    #         for j in range(24):
-    #             bbox.points.append(point_list[j])
-    #         bbox.scale.x = 0.1
-    #         bbox.color.a = 1.0
-    #         bbox.color.r = 1.0
-    #         bbox.color.g = 0.0
-    #         bbox.color.b = 0.0
-    #         #bbox.header.stamp = rospy.Time.now()
-    #         bbox.header.stamp = msg.header.stamp
-    #         bbox.header.frame_id = frame_id
-    #         bbox_arry.markers.append(bbox)
-
-            # add text
-            # text_show = Marker()
-            # text_show.type = Marker.TEXT_VIEW_FACING
-            # text_show.ns = "objects"
-            # text_show.header.stamp = msg.header.stamp
-            # text_show.header.frame_id = frame_id
-            # text_show.id = i + scores.size
-            # text_show.pose = Pose(
-            #     position=Point(float(dt_box_lidar[i][0]),
-            #                    float(dt_box_lidar[i][1]),
-            #                    float(dt_box_lidar[i][2])+2.0)
-            # )
-            # distance_obj = np.sqrt(dt_box_lidar[i][0]*dt_box_lidar[i][0] + dt_box_lidar[i][1]*dt_box_lidar[i][1])
-            # text_show.text = str(proc_1.net.class_names[types[i]-1]) + ' ' + str(round(scores[i], 2)) + '\n' + str(round(distance_obj, 2))
-            # text_show.action = Marker.ADD
-            # text_show.color.a = 1.0
-            # text_show.color.r = 1.0
-            # text_show.color.g = 1.0
-            # text_show.color.b = 0.0
-            # text_show.scale.z = 1.5
-            # bbox_arry.markers.append(text_show)
-
-    # print("total callback time: ", time.time() - t1)
-
-    # pub_bbox_array.publish(bbox_arry)
-    # cloud_array = xyz_array_to_pointcloud2(np_p[:, :3], rospy.Time.now(), frame_id)
-    # pub_point2_.publish(cloud_array)
-
-    # ## publish to fusion
-    # msg_lidar_objects = ObjectArray()
-    # msg_lidar_objects.header.stamp = msg.header.stamp
-    # msg_lidar_objects.header.frame_id = frame_id
-
-    # # get points in each box
-    # t3 = time.time()
-    # num_obj = dt_box_lidar.shape[0]
-    # point_indices = roiaware_pool3d_utils.points_in_boxes_cpu(
-    #     torch.from_numpy(np_p[:, 0:3]), torch.from_numpy(dt_box_lidar)
-    # ).numpy()  # (nboxes, npoints)
-
-    # t4 = time.time()
-    # print(f"get points in each box cost time: {t4 - t3}")
-    # print('')
-
-    # #clustered_points = []       #for test
-    # if scores.size != 0:
-    #     for i in range(scores.size):
-    #         lidar_object = Object()
-    #         lidar_object.header.stamp = msg.header.stamp
-    #         lidar_object.header.frame_id = frame_id
-            
-    #         lidar_object.id = i
-    #         lidar_object.pose.position.x = float(dt_box_lidar[i][0])
-    #         lidar_object.pose.position.y = float(dt_box_lidar[i][1])
-    #         lidar_object.pose.position.z = float(dt_box_lidar[i][2])
-    #         lidar_object.pose.orientation = yaw2quaternion(float(dt_box_lidar[i][6]))
-    #         lidar_object.shape.dimensions.append(float(dt_box_lidar[i][3]))
-    #         lidar_object.shape.dimensions.append(float(dt_box_lidar[i][4]))
-    #         lidar_object.shape.dimensions.append(float(dt_box_lidar[i][5]))
-    #         type_Plan = -1
-    #         if types[i] == 1:
-    #             type_Plan = 1
-    #         elif types[i] == 2:
-    #             type_Plan = 1
-    #         elif types[i] == 3:
-    #             type_Plan = 2
-    #         elif types[i] == 4:
-    #             type_Plan = 3
-    #         elif types[i] == 5:
-    #             type_Plan = 5
-    #         elif types[i] == 6:
-    #             type_Plan = 4
-    #         elif types[i] == 7:
-    #             type_Plan = 0
-    #         elif types[i] == 8:
-    #             type_Plan = 6
-                
-
-    #         lidar_object.classification = type_Plan
-
-    #         gt_points = np_p[point_indices[i] > 0]
-    #         for pp in range(gt_points.shape[0]):
-    #             temp_point = Point32()
-    #             temp_point.x = gt_points[pp][0]
-    #             temp_point.y = gt_points[pp][1]
-    #             temp_point.z = gt_points[pp][2]
-    #             lidar_object.polygon.points.append(temp_point)
-    #             #clustered_points.append(gt_points[pp,:].tolist())
-
-    #         msg_lidar_objects.objects.append(lidar_object)
-    
-    # # clustered_points = np.array(clustered_points)
-    # # cloud_array = xyz_array_to_pointcloud2(clustered_points[:, :3], rospy.Time.now(), frame_id)
-    # # pub_point2_.publish(cloud_array)
-
-    # pub_object_array.publish(msg_lidar_objects)
-
 
 if __name__ == "__main__":
     global proc
