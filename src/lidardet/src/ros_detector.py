@@ -1,7 +1,6 @@
 # ros package
 import rospy
 import ros_numpy
-import sensor_msgs.point_cloud2 as pc2
 from visualization_msgs.msg import MarkerArray, Marker
 from sensor_msgs.msg import PointCloud2, PointField
 from geometry_msgs.msg import Point, Point32, Pose
@@ -32,6 +31,10 @@ import rosbag
 from sensor_msgs.msg import Image
 from obs_msgs.msg import PerceptionObstacle, PerceptionObstacles
 from predict import Predictor
+import tf
+import tf2_ros
+import geometry_msgs.msg
+from tf2_sensor_msgs.tf2_sensor_msgs import do_transform_cloud
 
 class DemoDataset(DatasetTemplate):
     def __init__(self, dataset_cfg, class_names, training=True, root_path=None, logger=None, ext='.bin'):
@@ -297,6 +300,7 @@ def boxes_to_corners_3d(boxes3d):
 
 lidartracker = tracker()
 predictor = Predictor(120)
+
 def lidar_callback(msg):
     print('lidar_callback')
     t1 = time.time()
@@ -321,7 +325,7 @@ def lidar_callback(msg):
 
     # prediction
     predinput = PerceptionObstacles() 
-    predinput.header.stamp = rospy.Time.now()
+    predinput.header.stamp = msg.header.stamp
     predinput.header.frame_id = frame_id
     for trackedobj in lidartracker.trackerList:
         obj = PerceptionObstacle()
@@ -339,7 +343,7 @@ def lidar_callback(msg):
 
     empty_markers = MarkerArray()
     clear_marker = Marker()
-    clear_marker.header.stamp = rospy.Time.now()
+    clear_marker.header.stamp = msg.header.stamp
     clear_marker.header.frame_id = frame_id
     clear_marker.ns = "tracked objects"
     clear_marker.id = 0
@@ -353,10 +357,11 @@ def lidar_callback(msg):
     # draw trajectory
     for i in range(len(lidartracker.trackerList)):
         trajectory = Marker()
+        trajectory.pose = Pose(orientation = Quaternion(x=0,y=0,z=0,w=1))
         trajectory.type = Marker.LINE_STRIP
         trajectory.ns = "trajectory"
         trajectory.lifetime = rospy.Duration()
-        trajectory.header.stamp = rospy.Time.now()
+        trajectory.header.stamp = msg.header.stamp
         trajectory.header.frame_id = frame_id
 
         pred_xy = pred[0, :, :, i]
@@ -550,9 +555,39 @@ if __name__ == "__main__":
     pub_img = rospy.Publisher('/cam_front', Image, queue_size=1)
     bag_data = bag.read_messages()
     for topic, msg, t in bag_data:
+
+        broadcaster = tf2_ros.StaticTransformBroadcaster()
+        static_transformStamped = geometry_msgs.msg.TransformStamped()
+
+        static_transformStamped.header.stamp = msg.header.stamp
+        static_transformStamped.header.frame_id = "world"
+        static_transformStamped.child_frame_id = 'velodyne'
+
+        # lidar pos in world frame
+        static_transformStamped.transform.translation.x = 20
+        static_transformStamped.transform.translation.y = 10
+        static_transformStamped.transform.translation.z = 0
+
+        quat = tf.transformations.quaternion_from_euler(0,0,0)
+        static_transformStamped.transform.rotation.x = quat[0]
+        static_transformStamped.transform.rotation.y = quat[1]
+        static_transformStamped.transform.rotation.z = quat[2]
+        static_transformStamped.transform.rotation.w = quat[3]
+
+        broadcaster.sendTransform(static_transformStamped)
+        tfBuffer = tf2_ros.Buffer()
+        listener = tf2_ros.TransformListener(tfBuffer)
+
+        try:
+            transform = tfBuffer.lookup_transform("world","velodyne", rospy.Time())
+            pointInWorldFrame = do_transform_cloud(msg, transform)
+        except (tf2_ros.LookupException, tf2_ros.ConnectivityException, tf2_ros.ExtrapolationException):
+            continue
+
         if topic == '/rslidar_points':
-            pub_pt.publish(msg)
-            lidar_callback(msg)
+            # pub_pt.publish(msg)
+            pub_pt.publish(pointInWorldFrame)
+            lidar_callback(pointInWorldFrame)
         if topic == '/cam_front/csi_cam/image_raw':
             pub_img.publish(msg)
         # time.sleep(0.05)
