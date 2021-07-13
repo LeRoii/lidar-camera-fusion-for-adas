@@ -47,7 +47,7 @@ def yaw2quaternion(yaw: float) -> Quaternion:
 def makeobjects(networkret):
     objs = []
     for objdata in networkret:
-        if objdata[7] < 0.6:
+        if objdata[7] < 0.6:    #confidence
             continue
         centerpt = point3d(objdata[0], objdata[1], objdata[2])
         length = objdata[3]

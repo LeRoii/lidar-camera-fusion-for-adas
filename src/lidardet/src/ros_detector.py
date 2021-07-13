@@ -26,6 +26,7 @@ from pcdet.ops.roiaware_pool3d import roiaware_pool3d_utils
 
 from objectbase import objectbase, makeobjects
 from tracker import tracker
+from fusion import fusion
 
 import rosbag
 from sensor_msgs.msg import Image
@@ -35,6 +36,12 @@ import tf
 import tf2_ros
 import geometry_msgs.msg
 from tf2_sensor_msgs.tf2_sensor_msgs import do_transform_cloud
+
+from objmsg.msg import obj,objArray
+import threading
+
+lastimgmsgtime = 0
+lastlidarmsgtime = 0
 
 class DemoDataset(DatasetTemplate):
     def __init__(self, dataset_cfg, class_names, training=True, root_path=None, logger=None, ext='.bin'):
@@ -209,8 +216,8 @@ def get_xyz_points(cloud_array, remove_nans=True, dtype=np.float):
 
     # points[..., 2] = cloud_array['z'] + 0.2  # nuscene
 
-    # points[..., 0] = cloud_array['y']
-    # points[..., 1] = -cloud_array['x']
+    # points[..., 0] = cloud_array['x']
+    # points[..., 1] = cloud_array['y']
     # points[..., 2] = cloud_array['z'] + 1.0  # sq
 
     return points
@@ -299,19 +306,22 @@ def boxes_to_corners_3d(boxes3d):
     return corners3d.numpy() if is_numpy else corners3d
 
 lidartracker = tracker()
-predictor = Predictor(120)
+# predictor = Predictor(120)
+fusionnode = fusion()
 
 def lidar_callback(msg):
-    print('lidar_callback')
-    t1 = time.time()
+    global lastlidarmsgtime
+    print('lidar_callback:::msg time:', msg.header.stamp.to_sec())
+    print('lidar time diff:', msg.header.stamp.to_sec() - lastlidarmsgtime)
+    lastlidarmsgtime = msg.header.stamp.to_sec()
+    
     msg_cloud = ros_numpy.point_cloud2.pointcloud2_to_array(msg)
     frame_id = msg.header.frame_id
     np_p = get_xyz_points(msg_cloud, True)
-    # print(msg.header.stamp.to_sec())
     # print(rospy.Time.now().to_sec())
 
     # print(np_p.size)
-    scores, dt_box_lidar, types = proc_1.run(np_p)
+    scores, dt_box_lidar, types = proc_1.run(np_p)                                                       
     if len(dt_box_lidar) == 0:
         netret = []
     else:
@@ -323,23 +333,31 @@ def lidar_callback(msg):
     objs = makeobjects(netret)
     lidartracker.update(objs)
 
-    # prediction
-    predinput = PerceptionObstacles() 
-    predinput.header.stamp = msg.header.stamp
-    predinput.header.frame_id = frame_id
-    for trackedobj in lidartracker.trackerList:
-        obj = PerceptionObstacle()
-        obj.id = trackedobj.id
-        obj.type = int(trackedobj.objtype)
-        obj.x = trackedobj.bbox3d.centerpoint.x
-        obj.y = trackedobj.bbox3d.centerpoint.y
-        obj.heading = trackedobj.bbox3d.heading
-        obj.length = trackedobj.bbox3d.length
-        obj.width = trackedobj.bbox3d.width
-        obj.height = trackedobj.bbox3d.height
-        predinput.obstacles.append(obj)
+    lidarret = {
+        'timestamp' : msg.header.stamp.to_sec(),
+        'tracklist' : lidartracker.trackerList
+    }
 
-    pred, mean_xy = predictor.obstacle_callback(predinput)
+    fusionnode.updateLidarRet(lidarret)
+
+    # prediction
+    # predinput = PerceptionObstacles() 
+    # predinput.header.stamp = msg.header.stamp
+    # predinput.header.frame_id = frame_id
+    # for trackedobj in lidartracker.trackerList:
+    #     obj = PerceptionObstacle()
+    #     obj.id = trackedobj.id
+    #     obj.type = int(trackedobj.objtype)
+    #     obj.x = trackedobj.bbox3d.centerpoint.x
+    #     obj.y = trackedobj.bbox3d.centerpoint.y
+    #     obj.heading = trackedobj.bbox3d.heading
+    #     obj.length = trackedobj.bbox3d.length
+    #     obj.width = trackedobj.bbox3d.width
+    #     obj.height = trackedobj.bbox3d.height
+    #     predinput.obstacles.append(obj)
+
+    # if len(predinput.obstacles) != 0:
+    #     pred, mean_xy = predictor.obstacle_callback(predinput)
 
     empty_markers = MarkerArray()
     clear_marker = Marker()
@@ -355,30 +373,30 @@ def lidar_callback(msg):
     bbox_arry = MarkerArray()
 
     # draw trajectory
-    for i in range(len(lidartracker.trackerList)):
-        trajectory = Marker()
-        trajectory.pose = Pose(orientation = Quaternion(x=0,y=0,z=0,w=1))
-        trajectory.type = Marker.LINE_STRIP
-        trajectory.ns = "trajectory"
-        trajectory.lifetime = rospy.Duration()
-        trajectory.header.stamp = msg.header.stamp
-        trajectory.header.frame_id = frame_id
+    # for i in range(len(lidartracker.trackerList)):
+    #     trajectory = Marker()
+    #     trajectory.pose = Pose(orientation = Quaternion(x=0,y=0,z=0,w=1))
+    #     trajectory.type = Marker.LINE_STRIP
+    #     trajectory.ns = "trajectory"
+    #     trajectory.lifetime = rospy.Duration()
+    #     trajectory.header.stamp = msg.header.stamp
+    #     trajectory.header.frame_id = frame_id
 
-        pred_xy = pred[0, :, :, i]
-        for j in range(pred_xy.shape[-1]):
-            p = Point()
-            p.x = pred_xy[0, j] + mean_xy[0]
-            p.y = pred_xy[1, j] + mean_xy[1]
-            p.z = 0
-            trajectory.points.append(p)
+    #     pred_xy = pred[0, :, :, i]
+    #     for j in range(pred_xy.shape[-1]):
+    #         p = Point()
+    #         p.x = pred_xy[0, j] + mean_xy[0]
+    #         p.y = pred_xy[1, j] + mean_xy[1]
+    #         p.z = 0
+    #         trajectory.points.append(p)
 
-        trajectory.scale.x = 0.1
-        trajectory.color.a = 1.0
-        trajectory.color.r = 0.0
-        trajectory.color.g = 0.0
-        trajectory.color.b = 1.0
-        trajectory.id = i+1000
-        bbox_arry.markers.append(trajectory)
+    #     trajectory.scale.x = 0.1
+    #     trajectory.color.a = 1.0
+    #     trajectory.color.r = 0.0
+    #     trajectory.color.g = 0.0
+    #     trajectory.color.b = 1.0
+    #     trajectory.id = i+1000
+    #     bbox_arry.markers.append(trajectory)
 
 
     # draw detection objs
@@ -488,8 +506,26 @@ def lidar_callback(msg):
     pub_bbox_array.publish(bbox_arry)
     pass
 
+
+def imgret_callback(msg):
+    global lastimgmsgtime
+    rospy.loginfo('imgret_callback:::msg time: %s, time diff: %s', msg.header.stamp.to_sec(),
+    msg.header.stamp.to_sec() - lastimgmsgtime)
+    lastimgmsgtime =  msg.header.stamp.to_sec()
+
+    imgret={
+        'timestamp':msg.header.stamp.to_sec(),
+        'imgretlist':msg.objects
+    }
+
+    fusionnode.updateImgRet(imgret)
+
+
+def spin():
+    rospy.spin()
+
 if __name__ == "__main__":
-    global proc
+    
     ## config and model path
     #################################   KITTI   ##############################################################
     # config_path = '/home/iairiv/lidar_network/OpenLidarPerceptron/output/kitti_models_ck/pointpillar/baseline_20220131/pointpillar.yaml'
@@ -528,67 +564,78 @@ if __name__ == "__main__":
     # print()
 
     rospy.init_node('net_lidar_ros_node')
-    # sub_lidar_topic = [
-    #     "/velodyne_points",
-    #     "/rslidar_points",
-    #     "/kitti/velo/pointcloud",
-    #     "/calibrated_cloud",
-    #     "/segmenter/points_nonground"
-    # ]
-    # sub_ = rospy.Subscriber(sub_lidar_topic[1], PointCloud2, lidar_callback, queue_size=1, buff_size=2**24)
+    sub_lidar_topic = [
+        "/velodyne_points",
+        "/rslidar_points",
+        "/kitti/velo/pointcloud",
+        "/calibrated_cloud",
+        "/segmenter/points_nonground"
+    ]
+    sub_ = rospy.Subscriber(sub_lidar_topic[1], PointCloud2, lidar_callback, queue_size=1, buff_size=2**24)
+    imgretsub = rospy.Subscriber("/img_obj", objArray, imgret_callback, queue_size=1)
 
     pub_bbox_array = rospy.Publisher('lidar_net_results', MarkerArray, queue_size=1)
-    pub_point2_ = rospy.Publisher('lidar_points', PointCloud2, queue_size=1)
+    # pub_point2_ = rospy.Publisher('lidar_points', PointCloud2, queue_size=1)
     # pub_object_array = rospy.Publisher('lidar_DL_objects', ObjectArray, queue_size=1)
 
     # print("lidar net ros start!")
     # # rate = rospy.Rate(10)
     # rospy.spin()
-    # # rate.sleep()
+    # rate.sleep()
 
     bagfile = '/space/data/sq/lidar_camera_imu_2021-06-03-10-18-20-4.bag'
     bagfile = '/space/data/sq/lidar0429_3.4.bag'
+    bagfile = '/space/data/sq/0525_1_2021-01-21-19-02-39.bag'
+    bagfile = '/space/data/sq/zj_lidar_camera_2021-06-15-09-41-15.bag'
+    bagfile = '/space/data/sq/cxg/output1.bag'
+    # bagfile = '/space/data/sq/rslidar_mems.bag'
     # bagfile = '/space/data/sq/rslidar_mems.bag'
     bag = rosbag.Bag(bagfile,'r')
     print(bag.get_type_and_topic_info())
-    pub_pt = rospy.Publisher('/rslidar_points', PointCloud2, queue_size=1)
-    pub_img = rospy.Publisher('/cam_front', Image, queue_size=1)
-    bag_data = bag.read_messages()
-    for topic, msg, t in bag_data:
+    # pub_pt = rospy.Publisher('/rslidar_points', PointCloud2, queue_size=1)
+    # pub_img = rospy.Publisher('/cam_front', Image, queue_size=1)
+    # bag_data = bag.read_messages()
+    # for topic, msg, t in bag_data:
 
-        broadcaster = tf2_ros.StaticTransformBroadcaster()
-        static_transformStamped = geometry_msgs.msg.TransformStamped()
+    #     # broadcaster = tf2_ros.StaticTransformBroadcaster()
+    #     # static_transformStamped = geometry_msgs.msg.TransformStamped()
 
-        static_transformStamped.header.stamp = msg.header.stamp
-        static_transformStamped.header.frame_id = "world"
-        static_transformStamped.child_frame_id = 'velodyne'
+    #     # static_transformStamped.header.stamp = msg.header.stamp
+    #     # static_transformStamped.header.frame_id = "world"
+    #     # static_transformStamped.child_frame_id = 'velodyne'
 
-        # lidar pos in world frame
-        static_transformStamped.transform.translation.x = 20
-        static_transformStamped.transform.translation.y = 10
-        static_transformStamped.transform.translation.z = 0
+    #     # # lidar pos in world frame
+    #     # static_transformStamped.transform.translation.x = 0
+    #     # static_transformStamped.transform.translation.y = 0
+    #     # static_transformStamped.transform.translation.z = 0
 
-        quat = tf.transformations.quaternion_from_euler(0,0,0)
-        static_transformStamped.transform.rotation.x = quat[0]
-        static_transformStamped.transform.rotation.y = quat[1]
-        static_transformStamped.transform.rotation.z = quat[2]
-        static_transformStamped.transform.rotation.w = quat[3]
+    #     # quat = tf.transformations.quaternion_from_euler(0,0,0)
+    #     # static_transformStamped.transform.rotation.x = quat[0]
+    #     # static_transformStamped.transform.rotation.y = quat[1]
+    #     # static_transformStamped.transform.rotation.z = quat[2]
+    #     # static_transformStamped.transform.rotation.w = quat[3]
 
-        broadcaster.sendTransform(static_transformStamped)
-        tfBuffer = tf2_ros.Buffer()
-        listener = tf2_ros.TransformListener(tfBuffer)
+    #     # broadcaster.sendTransform(static_transformStamped)
+    #     # tfBuffer = tf2_ros.Buffer()
+    #     # listener = tf2_ros.TransformListener(tfBuffer)
 
-        try:
-            transform = tfBuffer.lookup_transform("world","velodyne", rospy.Time())
-            pointInWorldFrame = do_transform_cloud(msg, transform)
-        except (tf2_ros.LookupException, tf2_ros.ConnectivityException, tf2_ros.ExtrapolationException):
-            continue
+    #     # try:
+    #     #     transform = tfBuffer.lookup_transform("world","velodyne", rospy.Time())
+    #     #     pointInWorldFrame = do_transform_cloud(msg, transform)
+    #     # except (tf2_ros.LookupException, tf2_ros.ConnectivityException, tf2_ros.ExtrapolationException):
+    #     #     continue
 
-        if topic == '/rslidar_points':
-            # pub_pt.publish(msg)
-            pub_pt.publish(pointInWorldFrame)
-            lidar_callback(pointInWorldFrame)
-        if topic == '/cam_front/csi_cam/image_raw':
-            pub_img.publish(msg)
-        # time.sleep(0.05)
+    #     if topic == '/rslidar_points':
+    #         pub_pt.publish(msg)
+    #         # pub_pt.publish(pointInWorldFrame)
+    #         lidar_callback(msg)
+    #     # if topic == '/cam_front/csi_cam/image_raw':
+    #     if topic == '/wideangle/image_raw':
+    #         pub_img.publish(msg)
 
+    spin_thread = threading.Thread(target = spin)
+    spin_thread.start()
+    rate = rospy.Rate(10)
+    while not rospy.is_shutdown():
+        rospy.logwarn('inwhile')
+        rate.sleep()
