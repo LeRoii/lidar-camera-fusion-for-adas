@@ -4,7 +4,6 @@ import ros_numpy
 from visualization_msgs.msg import MarkerArray, Marker
 from sensor_msgs.msg import PointCloud2, PointField
 from geometry_msgs.msg import Point, Point32, Pose
-# from derived_object_msgs.msg import ObjectArray, Object
 
 from std_msgs.msg import Header
 
@@ -40,8 +39,68 @@ from tf2_sensor_msgs.tf2_sensor_msgs import do_transform_cloud
 from objmsg.msg import obj,objArray
 import threading
 
+from sensor_msgs.msg import NavSatFix
+import math
+
 lastimgmsgtime = 0
 lastlidarmsgtime = 0
+
+ellipse_a  = 6378137
+ellipse_e  = 0.081819190842622
+
+basePoint = [34.2569999, 108.6511768, 392.931]
+mat = np.zeros((4,3), dtype='float')
+
+def generateMat(lat,lon,height):
+    lat = lat / 180 * math.pi
+    lon = lon / 180 * math.pi
+    sinLati = math.sin(lat)
+    cosLati = math.cos(lat)
+    sinLong = math.sin(lon) 
+    cosLong = math.cos(lon)
+
+    N = ellipse_a / math.sqrt((1-ellipse_e*ellipse_e*sinLati*sinLati))
+
+    mat[1][0] = -sinLong
+    mat[1][1] = cosLong
+    mat[1][2] = 0
+    mat[0][0] = -sinLati*cosLong
+    mat[0][1] = -sinLati*sinLong
+    mat[0][2] = cosLati
+    mat[2][0] = cosLati*cosLong
+    mat[2][1] = cosLati*sinLong
+    mat[2][2] = sinLati
+
+    mat[3][0] = (N + height)*cosLati*cosLong
+    mat[3][1] = (N + height)*cosLati*sinLong
+    mat[3][2] = (N*(1 - ellipse_e*ellipse_e) + height)*sinLati
+
+    return mat
+
+def gps2ENU(lat,lon,height):
+    x0 = mat[3][0]
+    y0 = mat[3][1]
+    z0 = mat[3][2]
+
+    lat = lat / 180 * math.pi
+    lon = lon / 180 * math.pi
+    sinLati = math.sin(lat)
+    cosLati = math.cos(lat)
+    sinLong = math.sin(lon) 
+    cosLong = math.cos(lon)
+
+    N = ellipse_a / math.sqrt((1-ellipse_e*ellipse_e*sinLati*sinLati))
+    x1 = (N + height)*cosLati*cosLong
+    y1 = (N + height)*cosLati*sinLong
+    z1 = (N*(1 - ellipse_e*ellipse_e) + height)*sinLati
+    dx = x1 - x0 
+    dy = y1 - y0 
+    dz = z1 - z0
+    outputy = mat[0][0] * dx + mat[0][1] * dy + mat[0][2] * dz
+    outputx = mat[1][0] * dx + mat[1][1] * dy
+    outputz = mat[2][0] * dx + mat[2][1] * dy + mat[2][2] * dz
+
+    return outputx,outputy,outputz
 
 class DemoDataset(DatasetTemplate):
     def __init__(self, dataset_cfg, class_names, training=True, root_path=None, logger=None, ext='.bin'):
@@ -520,6 +579,9 @@ def imgret_callback(msg):
 
     fusionnode.updateImgRet(imgret)
 
+def gps_callback(msg):
+    rospy.loginfo('gps::lat:%s, log:%s', msg.latitude, msg.longitude)
+
 
 def spin():
     rospy.spin()
@@ -573,7 +635,7 @@ if __name__ == "__main__":
     ]
     sub_ = rospy.Subscriber(sub_lidar_topic[1], PointCloud2, lidar_callback, queue_size=1, buff_size=2**24)
     imgretsub = rospy.Subscriber("/img_obj", objArray, imgret_callback, queue_size=1)
-
+    gpssub = rospy.Subscriber("/gps/fix", NavSatFix, gps_callback, queue_size=10)
     pub_bbox_array = rospy.Publisher('lidar_net_results', MarkerArray, queue_size=1)
     # pub_point2_ = rospy.Publisher('lidar_points', PointCloud2, queue_size=1)
     # pub_object_array = rospy.Publisher('lidar_DL_objects', ObjectArray, queue_size=1)
@@ -637,5 +699,5 @@ if __name__ == "__main__":
     spin_thread.start()
     rate = rospy.Rate(10)
     while not rospy.is_shutdown():
-        rospy.logwarn('inwhile')
+        # rospy.logwarn('inwhile')
         rate.sleep()

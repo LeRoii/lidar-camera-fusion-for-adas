@@ -28,3 +28,14 @@ class fusion():
                 self.imgmsgque.clear()
             elif self.lidarmsgque[-1]['timestamp'] < self.imgmsgque[0]['timestamp']: #img needs to wait lidar
                 self.lidarmsgque.clear()
+
+    def findMatchedImg(self, timestamp):
+        for msg in self.imgmsgque:
+            if abs(timestamp - msg['timestamp']) < 0.2:
+                return msg
+        return None
+
+    def take(self, lidartime):
+        msg = self.findMatchedImg(lidartime) 
+        if msg is not None:
+            print('time diff:',lidartime - msg['timestamp'])
