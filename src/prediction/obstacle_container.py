@@ -145,9 +145,9 @@ class ObstacleContainer():
             obs = self.get_obstacle_lru_update(obj_id)
             if obs:
                 obs.insert(obj, obj_id, self.time_stamp, frame_id)
-                # print('refresh obs: ', obj_id)
+                print('refresh obs: ', obj_id)
             else:
-                # print('new obs: ', obj_id)
+                print('new obs: ', obj_id)
                 obs = Obstacle(self.time_stamp, frame_id, obj)
                 self.obstacles.set(obj_id, obs)
     def get_data(self, start, end):
