@@ -21,8 +21,8 @@ int main (int argc, char** argv){
     ros::console::notifyLoggerLevelsChanged();
 
     //*************fast detector init**********
-    std::string net = "/space/model/yolo-kitti/yolo4_fp32.rt";
-    int n_classes = 80;
+    std::string net = "/space/model/yolo-kitti/yolo4_fp32_sq.rt";
+    int n_classes = 3;
     float conf_thresh=0.3;
     fasterimgdetector fastdetector(n);
     fastdetector.initDetector(net, n_classes, conf_thresh);
@@ -43,8 +43,8 @@ int main (int argc, char** argv){
 
 
     // ros::Subscriber Img_sub = n.subscribe("/cam_front/csi_cam/image_raw", 1, &imgdetector::imgcallback, &detector);
-    // ros::Subscriber Img_fsub = n.subscribe("/cam_front/csi_cam/image_raw", 1, &fasterimgdetector::imgcallback, &fastdetector);
-    ros::Subscriber Img_fsub = n.subscribe("/wideangle/image_raw", 1, &fasterimgdetector::imgcallback, &fastdetector);
+    ros::Subscriber Img_fsub = n.subscribe("/cam_front/csi_cam/image_raw", 1, &fasterimgdetector::imgcallback, &fastdetector);
+    // ros::Subscriber Img_fsub = n.subscribe("/wideangle/image_raw", 1, &fasterimgdetector::imgcallback, &fastdetector);
 
     ros::spin();
 
